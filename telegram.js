@@ -2,8 +2,8 @@
 // TELEGRAM STORAGE + PLAYER INTEGRADO
 // ==========================================
 
-const BOT_TOKEN = 'SEU_BOT_TOKEN_AQUI';
-const MEU_CHAT_ID = 'SEU_CHAT_ID_AQUI';
+const BOT_TOKEN = '8827590598:AAFVi4ppIiG4TOtMo2UjEgNrD1PLrV0lIEU';
+const MEU_CHAT_ID = '6437756592';
 
 // ==========================================
 // CLASSE PRINCIPAL
