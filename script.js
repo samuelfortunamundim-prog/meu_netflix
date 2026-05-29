@@ -1,76 +1,51 @@
-// Variáveis globais
-let filmeSelecionado = null;
-let serieSelecionada = null;
-let TipoAtual = 'movie';
 
-// Inicializar app
-document.addEventListener('DOMContentLoaded', async () => {
-    await inicializarApp();
-});
+// ==========================================
+// SCRIPT PRINCIPAL
+// ==========================================
 
-// Inicializar aplicação
-async function inicializarApp() {
-    try {
-        // Carregar banner principal
-        await carregarBanner();
+let itemAtual = null;
+let bannerFilme = null;
 
-        // Carregar categorias
-        await carregarCategorias();
+// Inicializar
+document.addEventListener('DOMContentLoaded', init);
 
-        // Configurar scroll do header
-        configurarScroll();
-    } catch (erro) {
-        console.error('Erro ao inicializar:', erro);
-    }
+async function init() {
+    await carregarBanner();
+    await carregarCategorias();
+    configurarScroll();
 }
 
-// Carregar banner principal
+// Banner
 async function carregarBanner() {
-    const filmes = await getFilmesPopulares();
-    if (!filmes || !filmes.results || filmes.results.length === 0) return;
+    const dados = await getPopulares();
+    if (!dados?.results) return;
 
-    // Escolher um filme aleatório para o banner
-    const filmeBanner = filmes.results[Math.floor(Math.random() * filmes.results.length)];
-    
-    const banner = document.getElementById('banner');
-    const titulo = document.getElementById('banner-titulo');
-    const descricao = document.getElementById('banner-descricao');
-
-    // Configurar background
-    banner.style.backgroundImage = `url(${BACKDROP_URL}${filmeBanner.backdrop_path})`;
-    
-    titulo.textContent = filmeBanner.title;
-    descricao.textContent = filmeBanner.overview;
-
-    // Guardar para uso global
-    filmeSelecionado = {
-        id: filmeBanner.id,
-        titulo: filmeBanner.title,
+    const filme = dados.results[Math.floor(Math.random() * dados.results.length)];
+    bannerFilme = {
+        id: filme.id,
+        titulo: filme.title,
         tipo: 'movie',
-        poster: filmeBanner.poster_path
+        poster: filme.poster_path
     };
+
+    document.getElementById('banner').style.backgroundImage = `url(${getBg(filme.backdrop_path)})`;
+    document.getElementById('banner-titulo').textContent = filme.title;
+    document.getElementById('banner-descricao').textContent = filme.overview;
 }
 
-// Carregar categorias
+// Categorias
 async function carregarCategorias() {
-    // Populares
-    const populares = await getFilmesPopulares();
+    const populares = await getPopulares();
     renderizarCarrossel('populares', populares?.results || [], 'movie');
 
-    // Em Alta
-    const emAlta = await getFilmesEmAlta();
+    const emAlta = await getEmAlta();
     renderizarCarrossel('em-alta', emAlta?.results || [], 'movie');
 
-    // Séries
-    const series = await getSeriesPopulares();
+    const series = await getSeries();
     renderizarCarrossel('series', series?.results || [], 'tv');
-
-    // Filmes
-    const filmesDocs = await getFilmesEmAlta();
-    renderizarCarrossel('filmes', filmesDocs?.results || [], 'movie');
 }
 
-// Renderizar carrossel
+// Renderizar
 function renderizarCarrossel(id, items, tipo) {
     const container = document.getElementById(id);
     if (!container) return;
@@ -78,92 +53,97 @@ function renderizarCarrossel(id, items, tipo) {
     container.innerHTML = '';
 
     items.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'filme-card';
-        card.onclick = () => mostrarDetalhes(item.id, tipo);
-
-        const imgSrc = tipo === 'movie' ? item.poster_path : item.poster_path;
-        
-        card.innerHTML = `
-            <img src="${getImagemCAMINHO(imgSrc)}" alt="${tipo === 'movie' ? item.title : item.name}">
-            <div class="filme-overlay">
-                <span>${tipo === 'movie' ? item.title : item.name}</span>
-            </div>
-        `;
-
-        container.appendChild(card);
+        const div = document.createElement('div');
+        div.className = 'filme-card';
+        div.onclick = () => abrirDetalhes(item.id, tipo);
+        div.innerHTML = `<img src="${getImg(item.poster_path)}" alt="${item.title || item.name}">`;
+        container.appendChild(div);
     });
 }
 
-// Mostrar detalhes
-async function mostrarDetalhes(id, tipo) {
-    try {
-        const detalhes = await getDetalhes(id, tipo);
-        if (!detalhes) return;
+// Detalhes
+async function abrirDetalhes(id, tipo) {
+    const dados = await getDetalhes(id, tipo);
+    if (!dados) return;
 
-        const modal = document.getElementById('modal-detalhes');
-        
-        document.getElementById('modal-banner').src = BACKDROP_URL + (detalhes.backdrop_path || detalhes.poster_path);
-        document.getElementById('modal-titulo').textContent = tipo === 'movie' ? detalhes.title : detalhes.name;
-        document.getElementById('modal-nota').textContent += ` ${(detalhes.vote_average * 10).toFixed(0)}%`;
-        document.getElementById('modal-ano').textContent = new Date(detalhes.release_date || detalhes.first_air_date).getFullYear();
-        document.getElementById('modal-tempo').textContent = `${detalhes.runtime || detalhes.episode_run_time?.[0] || 0} min`;
-        document.getElementById('modal-sinopse').textContent = detalhes.overview;
+    itemAtual = {
+        id: dados.id,
+        titulo: dados.title || dados.name,
+        tipo: tipo,
+        poster: dados.poster_path
+    };
 
-        film/serieAtual = {
-            id: id,
-            titulo: tipo === 'movie' ? detalhes.title : detalhes.name,
-            tipo: tipo,
-            poster: detalhes.poster_path
-        };
+    document.getElementById('modal-banner').src = getBg(dados.backdrop_path || dados.poster_path);
+    document.getElementById('modal-titulo').textContent = dados.title || dados.name;
+    document.getElementById('modal-nota').textContent = `${Math.round(dados.vote_average * 10)}%`;
+    document.getElementById('modal-ano').textContent = new Date(dados.release_date || dados.first_air_date).getFullYear();
+    document.getElementById('modal-tempo').textContent = `${dados.runtime || dados.episode_run_time?.[0] || 0} min`;
+    document.getElementById('modal-sinopse').textContent = dados.overview;
+    document.getElementById('modal-detalhes').style.display = 'block';
+}
 
-        modal.style.display = 'block';
-    } catch (erro) {
-        console.error('Erro ao carregar detalhes:', erro);
+// Funções do player
+async function playPlayer() {
+    if (itemAtual) {
+        await playerNet.play(itemAtual);
     }
 }
 
-// Funções diversas
+async function playBanner() {
+    if (bannerFilme) {
+        await playerNet.play(bannerFilme);
+    }
+}
+
+// Favoritos
+async function addLista() {
+    if (itemAtual) {
+        await addFavorito(itemAtual);
+    }
+}
+
+// Telegram
+async function salvarNoTelegram() {
+    if (itemAtual) {
+        await telegramStore.adicionarFilme(itemAtual);
+        alert('Enviado para o Telegram! 📱');
+    }
+}
+
+function abrirTelegram() {
+    if (BOT_TOKEN && MEU_CHAT_ID) {
+        window.open(`https://t.me/SeuBotAqui`, '_blank');
+    } else {
+        alert('Configure o Bot Token em telegram.js!');
+    }
+}
+
+// Fechar modais
 function fecharModal() {
     document.getElementById('modal-detalhes').style.display = 'none';
 }
 
 function fecharPlayer() {
-    playerNet.fecharPlayer();
+    playerNet.close();
 }
 
+function home() {
+    window.location.reload();
+}
+
+// Scroll
 function configurarScroll() {
     window.addEventListener('scroll', () => {
         const header = document.getElementById('header');
-        if (window.scrollY > 100) {
-            header.classList.add('scrolled');
-        } else {
-            header.classList.remove('scrolled');
-        }
+        header.classList.toggle('scrolled', window.scrollY > 100);
     });
 }
 
-// Funções de busca
-async function buscar(event) {
-    if (event.key === 'Enter' || event.target.value.length > 2) {
-        await buscarFilmes();
-    }
-}
+// Clique fora para fechar
+document.getElementById('modal-detalhes').addEventListener('click', (e) => {
+    if (e.target.id === 'modal-detalhes') fecharModal();
+});
 
-async function buscarFilmes() {
-    const input = document.getElementById('input-busca');
-    const query = input.value;
-    if (!query) return;
-
-    const resultados = await buscarOnline(query);
-    const Container = document.getElementById('resultados-busca');
-    
-    Container.innerHTML = '';
-
-    const todos = [...resultados.movies, ...resultados.tv];
-    todos.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'filme-card';
-        card.onclick = () => {
-            const tipo = item.media_type === 'tv' ? 'tv' : 'movie';
-            mostrarDetalhes(item.id
+document.getElementById('player').addEventListener('click', (e) => {
+    if (e.target.id === 'player') fecharPlayer();
+});
