@@ -1,5 +1,5 @@
 // CONFIGURAÇÃO DA API TMDB
-const API_KEY = 'SUA_API_KEY_AQUI'; // Pegue em https://www.themoviedb.org/settings/api
+const API_KEY = '67387393296f4b25985d2b358b426fe4'; // Pegue em https://www.themoviedb.org/settings/api
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMG_URL = 'https://image.tmdb.org/t/p/w500';
 const BACKDROP_URL = 'https://image.tmdb.org/t/p/original';
