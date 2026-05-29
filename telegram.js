@@ -1,131 +1,279 @@
-// CONFIGURAÇÃO DO TELEGRAM BOT
-const TELEGRAM_BOT_TOKEN = 'SEU_BOT_TOKEN_AQUI'; // Crie um bot via @BotFather
-const CHAT_ID = 'SEU_CHAT_ID_AQUI'; // Seu ID do Telegram
+// ==========================================
+// TELEGRAM STORAGE + PLAYER INTEGRADO
+// ==========================================
 
-// Classe para gerenciar favoritos no Telegram
-class GerenciadorTelegram {
+const BOT_TOKEN = 'SEU_BOT_TOKEN_AQUI';
+const MEU_CHAT_ID = 'SEU_CHAT_ID_AQUI';
+
+// ==========================================
+// CLASSE PRINCIPAL
+// ==========================================
+
+class TelegramStorage {
     constructor() {
-        this.favoritos = this.carregarFavoritos();
+        this.favoritos = this.carregarLocal();
+        this.filmesDB = this.carregarDB();
     }
 
-    // Carregar favoritos do localStorage
-    carregarFavoritos() {
-        const salvos = localStorage.getItem('netflix_favoritos');
-        return salvos ? JSON.parse(salvos) : [];
+    // Carregar do localStorage
+    carregarLocal() {
+        return JSON.parse(localStorage.getItem('netflix_filmes') || '[]');
     }
 
-    // Salvar favoritos no localStorage
-    salvarFavoritos() {
-        localStorage.setItem('netflix_favoritos', JSON.stringify(this.favoritos));
+    // Salvar no localStorage
+    salvarLocal() {
+        localStorage.setItem('netflix_filmes', JSON.stringify(this.favoritos));
     }
 
-    // Adicionar aos favoritos
-    adicionarFavorito(filme) {
-        const novoFavorito = {
-            id: filme.id,
-            tipo: filme.tipo || 'movie',
-            titulo: filme.titulo,
-            poster: filme.poster,
-            dataAdicao: new Date().toISOString()
-        };
-
+    // ==========================================
+    // ADICIONAR FILME (Vai pro Telegram + Local)
+    // ==========================================
+    async adicionarFilme(filme) {
         // Verificar se já existe
-        const existe = this.favoritos.some(f => f.id === novoFavorito.id && f.tipo === novoFavorito.tipo);
+        const existe = this.favoritos.some(f => f.id === filme.id);
         
-        if (!existe) {
-            this.favoritos.push(novoFavorito);
-            this.salvarFavoritos();
-            this.enviarParaTelegram(novoFavorito);
-            return true;
+        if (existe) {
+            return { sucesso: false, msg: 'Filme já está na lista!' };
         }
-        return false;
+
+        // Adicionar ao local
+        this.favoritos.push({
+            ...filme,
+            dataAdd: new Date().toISOString(),
+            status: 'pendente'
+        });
+        this.salvarLocal();
+
+        // Enviar para o Telegram
+        await this.enviarParaTelegram(filme, 'adicionar');
+
+        return { sucesso: true, msg: 'Filme adicionado!' };
     }
 
-    // Remover dos favoritos
-    removerFavorito(id, tipo) {
-        this.favoritos = this.favoritos.filter(f => !(f.id === id && f.tipo === tipo));
-        this.salvarFavoritos();
+    // ==========================================
+    // REMOVER FILME
+    // ==========================================
+    async removerFilme(id) {
+        this.favoritos = this.favoritos.filter(f => f.id !== id);
+        this.salvarLocal();
+        
+        await this.enviarParaTelegram({ id }, 'remover');
     }
 
-    // Verificar se é favorito
-    eFavorito(id, tipo) {
-        return this.favoritos.some(f => f.id === id && f.tipo === tipo);
-    }
-
-    // Obter lista de favoritos
-    getFavoritos() {
+    // ==========================================
+    // OBTER LISTA COMPLETA
+    // ==========================================
+    getLista() {
         return this.favoritos;
     }
 
-    // Enviar mensagem para o Telegram
-    async enviarParaTelegram(filme) {
-        const mensagem = `
-🎬 *Novo Filme/Série Adicionado!*
+    // ==========================================
+    // BUSCAR STREAM NO TELEGRAM
+    // ==========================================
+    async buscarStream(filmeId) {
+        // Primeiro tenta buscar nos favoritos locais
+        const filme = this.favoritos.find(f => f.id === filmeId);
+        
+        if (filme && filme.streamUrl) {
+            return filme.streamUrl;
+        }
 
-*Título:* ${filme.titulo}
-*Tipo:* ${filme.tipo === 'movie' ? 'Filme' : 'Série'}
-*Data:* ${new Date(filme.dataAdicao).toLocaleDateString('pt-BR')}
+        // Se não tiver, pergunta ao Telegram
+        if (BOT_TOKEN && MEU_CHAT_ID) {
+            await this.pedirStreamAoBot(filmeId);
+            return null;
+        }
 
-🎥 Adicionado à sua lista no Netflix Clone!
-        `.trim();
+        return null;
+    }
 
-        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    // ==========================================
+    // ENVIAR MENSAGEM PARA O TELEGRAM
+    // ==========================================
+    async enviarParaTelegram(filme, acao) {
+        if (!BOT_TOKEN || !MEU_CHAT_ID) return;
+
+        const acoes = {
+            adicionar: `🎬 *NOVO FILME ADICIONADO*\n\n*Título:* ${filme.titulo}\n*Tipo:* ${filme.tipo === 'movie' ? '🎬 Filme' : '📺 Série'}\n*Data:* ${new Date().toLocaleDateString('pt-BR')}\n\n➕ Adicionado à lista`,
+            remover: `🗑️ *FILME REMOVIDO*\n\n*ID:* ${filme.id}\n\n➖ Removido da lista`,
+            lista: `📋 *MINHA LISTA*\n\n${this.formatarLista()}`
+        };
+
+        const mensagem = acoes[acao] || 'Mensagem';
 
         try {
-            await fetch(url, {
+            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    chat_id: CHAT_ID,
+                    chat_id: MEU_CHAT_ID,
                     text: mensagem,
                     parse_mode: 'Markdown'
                 })
             });
-        } catch (erro) {
-            console.log('Erro ao enviar para Telegram (modo local):', erro);
+        } catch (e) {
+            console.log('Erro ao enviar para Telegram');
         }
     }
 
-    // Enviar lista completa
+    // ==========================================
+    // PEDIR STREAM AO BOT
+    // ==========================================
+    async pedirStreamAoBot(filmeId) {
+        if (!BOT_TOKEN) return null;
+
+        try {
+            const resposta = await fetch(
+                `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: MEU_CHAT_ID,
+                        text: `🔍 *PEDIDO DE STREAM*\n\nBuscando stream para filme ID: ${filmeId}\n\nAguarde...`
+                    })
+                }
+            );
+            return await resposta.json();
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // ==========================================
+    // ENVIAR LISTA COMPLETA
+    // ==========================================
     async enviarListaCompleta() {
-        if (this.favoritos.length === 0) return;
+        const ListaFormatada = this.favoritos.map((f, i) => 
+            `${i + 1}. ${f.titulo} (${f.tipo === 'movie' ? '🎬' : '📺'})`
+        ).join('\n');
 
-        let mensagem = `📚 *Minha Lista - Netflix Clone*\n\n`;
+        const msg = `📺 *MINHA LISTA - Netflix Clone*\n\n` +
+            (ListaFormatada || 'Nenhum filme ainda!') +
+            `\n\n📊 Total: ${this.favoritos.length} filmes`;
 
-        this.favoritos.forEach((filme, index) => {
-            mensagem += `${index + 1}. ${filme.titulo} (${filme.tipo === 'movie' ? '🎬' : '📺'})\n`;
-        });
-
-        mensagem += `\n📊 Total: ${this.favoritos.length} itens`;
-
-        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-        try {
-            await fetch(url, {
+        if (BOT_TOKEN && MEU_CHAT_ID) {
+            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    chat_id: CHAT_ID,
-                    text: mensagem,
+                    chat_id: MEU_CHAT_ID,
+                    text: msg,
                     parse_mode: 'Markdown'
                 })
             });
-        } catch (erro) {
-            console.log('Erro ao enviar lista (salvo localmente)');
         }
     }
 
-    // Criar link para o bot
-    getLinkBot() {
-        return `https://t.me/SeuBot_Aqui?start=netflix`;
+    // ==========================================
+    // ATUALIZAR STREAM DE UM FILME
+    // ==========================================
+    atualizarStream(id, streamUrl) {
+        const filme = this.favoritos.find(f => f.id === id);
+        if (filme) {
+            filme.streamUrl = streamUrl;
+            this.salvarLocal();
+        }
     }
 
-    // Criar link para compartilhar um filme
-    getLinkCompartilhar(filme) {
-        const texto = `Check out ${filme.titulo}! 🎬`;
-        return `https://t.me/share/url?url=${encodeURIComponent(texto)}`;
+    formatarLista() {
+        if (this.favoritos.length === 0) return 'Nenhum filme na lista!';
+        
+        return this.favoritos.map((f, i) => 
+            `${i + 1}. ${f.titulo} ${f.streamUrl ? '✅' : '⏳'}`
+        ).join('\n');
     }
 }
 
-// Inicializar gerenciador
-const telegramManager = new GerenciadorTelegram();
+// ==========================================
+// PLAYER INTEGRADO
+// ==========================================
+
+class PlayerInterno {
+    constructor() {
+        this.storage = new TelegramStorage();
+    }
+
+    async play(filme) {
+        const titulo = document.getElementById('player-titulo');
+        const frame = document.getElementById('video-frame');
+        const modal = document.getElementById('player');
+
+        titulo.textContent = filme.titulo;
+        modal.style.display = 'block';
+
+        // 1️⃣ Primeiro tenta trailer do TMDB
+        const video = await getVideos(filme.id, filme.tipo);
+        if (video && video.key) {
+            frame.src = `https://www.youtube.com/embed/${video.key}?autoplay=1`;
+            return;
+        }
+
+        // 2️⃣ Procura stream salvo
+        const streamUrl = await this.storage.buscarStream(filme.id);
+        if (streamUrl) {
+            frame.src = streamUrl;
+            return;
+        }
+
+        // 3️⃣ Abre opções do Telegram
+        this.mostrarOpcoes(filme);
+    }
+
+    async mostrarOpcoes(filme) {
+        const opcoes = `
+            <div class="opcoes-stream">
+                <h3>Escolha como assistir:</h3>
+                <button class="btn" onclick="playerNet.playTrailer(${filme.id}, '${filme.tipo}')">
+                    🎬 Assistir Trailer
+                </button>
+                <button class="btn" onclick="playerNet.pedirNoTelegram(${filme.id}, '${filme.titulo}')">
+                    📱 Pedir no Telegram
+                </button>
+                <button class="btn" onclick="playerNet.assistirDoTelegram()">
+                    ▶️ Ver Lista Completa
+                </button>
+            </div>
+        `;
+
+        alert('Selecione uma opção acima!');
+    }
+
+    async pedirNoTelegram(id, titulo) {
+        if (!BOT_TOKEN) {
+            alert('Bot não configurado!');
+            return;
+        }
+
+        const link = `https://t.me/SeuBotAqui?start=play_${id}`;
+        window.open(link, '_blank');
+    }
+
+    async assistirDoTelegram() {
+        await this.storage.enviarListaCompleta();
+        const link = `https://t.me/SeuBotAqui?start=lista`;
+        window.open(link, '_blank');
+    }
+
+    close() {
+        document.getElementById('video-frame').src = '';
+        document.getElementById('player').style.display = 'none';
+    }
+}
+
+// ==========================================
+// INSTÂNCIAS
+// ==========================================
+
+const telegramStore = new TelegramStorage();
+const playerNet = new PlayerInterno();
+
+// Funções globais para o HTML
+async function addFavorito(filme) {
+    const resultado = await telegramStore.adicionarFilme(filme);
+    alert(resultado.msg);
+}
+
+function getStreams() {
+    return telegramStore.getLista().filter(f => f.streamUrl);
+}
